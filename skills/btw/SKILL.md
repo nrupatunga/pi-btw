@@ -24,6 +24,8 @@ Use these commands in your guidance to the user:
 /btw <question>
 /btw --save <question>
 /btw:new [question]
+/btw:tangent <question>
+/btw:tangent --save <question>
 /btw:clear
 /btw:inject [instructions]
 /btw:summarize [instructions]
@@ -65,7 +67,23 @@ or
 /btw:new <question>
 ```
 
-Use this when the previous BTW discussion is no longer relevant.
+Use this when the previous BTW discussion is no longer relevant, but you still want the new side thread to inherit the current main-session context.
+
+### For a contextless tangent thread
+
+Recommend:
+
+```text
+/btw:tangent <question>
+```
+
+or
+
+```text
+/btw:tangent --save <question>
+```
+
+Use this when the user wants a side conversation that does not include the current main-session context.
 
 ### To hand the full thread back to the main agent
 
@@ -90,9 +108,10 @@ Use this when the thread is long and only the distilled outcome should go back i
 ## Recommendation rules
 
 - Prefer `/btw` over normal chat when the user explicitly wants a side conversation.
+- Prefer `/btw:tangent` when the user wants that side conversation to be contextless.
 - Prefer `/btw:summarize` over `/btw:inject` for long exploratory threads.
 - Prefer `/btw:inject` when precise wording, detailed tradeoffs, or a full plan matters.
-- Suggest `/btw:new` before starting a totally unrelated side topic.
+- Suggest `/btw:new` before starting a totally unrelated side topic when main-session context is still useful.
 - Suggest `/btw:clear` when the widget/thread should be dismissed.
 
 ## Response style
@@ -115,6 +134,12 @@ When helping the user use BTW:
 
 ```text
 /btw:new sketch a safer migration plan
+```
+
+### Example: start a contextless tangent
+
+```text
+/btw:tangent think through this from first principles without using the current chat context
 ```
 
 ### Example: send the result back

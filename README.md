@@ -10,6 +10,7 @@ A small [pi](https://github.com/badlogic/pi-mono) extension that adds a `/btw` s
 
 - opens a parallel side conversation without interrupting the main run
 - keeps a continuous BTW thread by default
+- supports `/btw:tangent` for a contextless side thread that does not inherit the current main-session conversation
 - streams answers into a widget above the editor
 - keeps BTW thread entries out of the main agent's future context
 - lets you inject the full thread, or a summary of it, back into the main agent
@@ -48,6 +49,7 @@ pi install /absolute/path/to/pi-btw
 /btw how would you refactor this parser?
 /btw --save summarize the last error in one sentence
 /btw:new let's start a fresh thread about auth
+/btw:tangent brainstorm from first principles without using the current chat context
 /btw:inject implement the plan we just discussed
 /btw:summarize turn that side thread into a short handoff
 /btw:clear
@@ -67,7 +69,16 @@ pi install /absolute/path/to/pi-btw
 ### `/btw:new [question]`
 
 - clears the current BTW thread
+- starts a fresh thread that still inherits the current main-session context
 - optionally asks the first question in the new thread immediately
+
+### `/btw:tangent [--save] <question>`
+
+- starts or continues a contextless tangent thread
+- does not inherit the current main-session conversation
+- if you switch from `/btw` to `/btw:tangent` (or back), the previous side thread is cleared so the modes do not mix
+- streams into the same above-editor widget
+- with `--save`, also saves that single exchange as a visible session note
 
 ### `/btw:clear`
 
@@ -95,6 +106,7 @@ BTW exchanges are persisted in the session as hidden custom entries so they:
 
 - survive reloads and restarts
 - rehydrate the BTW widget for the current branch
+- preserve whether the current side thread is a normal `/btw` thread or a contextless `/btw:tangent`
 - stay out of the main agent's LLM context
 
 ### Visible saved notes

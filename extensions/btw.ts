@@ -19,12 +19,14 @@ const BTW_RESET_TYPE = "btw-thread-reset";
 
 const BTW_SYSTEM_PROMPT = [
   "You are having an aside conversation with the user, separate from their main working session.",
-  "The main session messages are provided for context only — that work is being handled by another agent.",
+  "If main session messages are provided, they are for context only — that work is being handled by another agent.",
+  "If no main session messages are provided, treat this as a fully contextless tangent thread and rely only on the user's words plus your general instructions.",
   "Focus on answering the user's side questions, helping them think through ideas, or planning next steps.",
   "Do not act as if you need to continue unfinished work from the main session unless the user explicitly asks you to prepare something for injection back to it.",
 ].join(" ");
 
 type SessionThinkingLevel = "off" | AiThinkingLevel;
+type BtwThreadMode = "contextual" | "tangent";
 
 type BtwDetails = {
   question: string;
@@ -43,6 +45,11 @@ type ParsedBtwArgs = {
 };
 
 type SaveState = "not-saved" | "saved" | "queued";
+
+type BtwResetDetails = {
+  timestamp: number;
+  mode?: BtwThreadMode;
+};
 
 type BtwSlot = {
   question: string;
@@ -98,8 +105,13 @@ function buildMainMessages(ctx: ExtensionCommandContext): Message[] {
   return sessionContext.messages.filter((message) => !isVisibleBtwMessage(message));
 }
 
-function buildBtwContext(ctx: ExtensionCommandContext, question: string, thread: BtwDetails[]) {
-  const messages: Message[] = [...buildMainMessages(ctx)];
+function buildBtwContext(
+  ctx: ExtensionCommandContext,
+  question: string,
+  thread: BtwDetails[],
+  mode: BtwThreadMode,
+) {
+  const messages: Message[] = mode === "contextual" ? [...buildMainMessages(ctx)] : [];
 
   if (thread.length > 0) {
     messages.push(
@@ -210,6 +222,7 @@ function notify(ctx: ExtensionContext | ExtensionCommandContext, message: string
 
 export default function (pi: ExtensionAPI) {
   let pendingThread: BtwDetails[] = [];
+  let pendingMode: BtwThreadMode = "contextual";
   let slots: BtwSlot[] = [];
   let widgetStatus: string | null = null;
 
@@ -240,7 +253,7 @@ export default function (pi: ExtensionAPI) {
         const warning = (text: string) => theme.fg("warning", text);
         const parts: string[] = [];
 
-        const title = " 💭 btw ";
+        const title = pendingMode === "tangent" ? " 💭 btw:tangent " : " 💭 btw ";
         const hint = " /btw:clear dismiss · /btw:inject send ";
         const width = Math.max(22, 68 - title.length - hint.length);
         parts.push(dim(`╭${title}${"─".repeat(width)}${hint}╮`));
@@ -285,13 +298,19 @@ export default function (pi: ExtensionAPI) {
     );
   }
 
-  function resetThread(ctx: ExtensionContext | ExtensionCommandContext, persist = true): void {
+  function resetThread(
+    ctx: ExtensionContext | ExtensionCommandContext,
+    persist = true,
+    mode: BtwThreadMode = "contextual",
+  ): void {
     abortActiveSlots();
     pendingThread = [];
+    pendingMode = mode;
     slots = [];
     widgetStatus = null;
     if (persist) {
-      pi.appendEntry(BTW_RESET_TYPE, { timestamp: Date.now() });
+      const details: BtwResetDetails = { timestamp: Date.now(), mode };
+      pi.appendEntry(BTW_RESET_TYPE, details);
     }
     renderWidget(ctx);
   }
@@ -299,6 +318,7 @@ export default function (pi: ExtensionAPI) {
   function restoreThread(ctx: ExtensionContext): void {
     abortActiveSlots();
     pendingThread = [];
+    pendingMode = "contextual";
     slots = [];
     widgetStatus = null;
 
@@ -308,6 +328,8 @@ export default function (pi: ExtensionAPI) {
     for (let i = 0; i < branch.length; i++) {
       if (isCustomEntry(branch[i], BTW_RESET_TYPE)) {
         lastResetIndex = i;
+        const details = branch[i].data as BtwResetDetails | undefined;
+        pendingMode = details?.mode ?? "contextual";
       }
     }
 
@@ -339,6 +361,7 @@ export default function (pi: ExtensionAPI) {
     ctx: ExtensionCommandContext,
     question: string,
     saveRequested: boolean,
+    mode: BtwThreadMode,
   ): Promise<void> {
     const model = ctx.model;
     if (!model) {
@@ -353,6 +376,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     const wasBusy = !ctx.isIdle();
+    pendingMode = mode;
     const thinkingLevel = pi.getThinkingLevel() as SessionThinkingLevel;
     const slot: BtwSlot = {
       question,
@@ -368,7 +392,7 @@ export default function (pi: ExtensionAPI) {
     renderWidget(ctx);
 
     try {
-      const stream = streamSimple(model, buildBtwContext(ctx, question, threadSnapshot), {
+      const stream = streamSimple(model, buildBtwContext(ctx, question, threadSnapshot, mode), {
         apiKey,
         reasoning: toReasoning(thinkingLevel),
         signal: slot.controller.signal,
@@ -552,17 +576,38 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      await runBtw(ctx, question, save);
+      if (pendingMode !== "contextual") {
+        resetThread(ctx, true, "contextual");
+      }
+
+      await runBtw(ctx, question, save, "contextual");
+    },
+  });
+
+  pi.registerCommand("btw:tangent", {
+    description: "Start or continue a contextless BTW tangent that does not inherit the main session context.",
+    handler: async (args, ctx) => {
+      const { question, save } = parseBtwArgs(args);
+      if (!question) {
+        notify(ctx, "Usage: /btw:tangent [--save] <question>", "warning");
+        return;
+      }
+
+      if (pendingMode !== "tangent") {
+        resetThread(ctx, true, "tangent");
+      }
+
+      await runBtw(ctx, question, save, "tangent");
     },
   });
 
   pi.registerCommand("btw:new", {
-    description: "Start a fresh BTW thread. Optionally ask the first question immediately.",
+    description: "Start a fresh BTW thread with main-session context. Optionally ask the first question immediately.",
     handler: async (args, ctx) => {
-      resetThread(ctx);
+      resetThread(ctx, true, "contextual");
       const { question, save } = parseBtwArgs(args);
       if (question) {
-        await runBtw(ctx, question, save);
+        await runBtw(ctx, question, save, "contextual");
       } else {
         notify(ctx, "Started a fresh BTW thread.", "info");
       }
